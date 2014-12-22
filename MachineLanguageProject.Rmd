@@ -1,0 +1,168 @@
+---
+title: "Predicting How Effectively People Exercise"
+author: "Adrien Seybert"
+date: "12/19/2014"
+output: html_document
+---
+Introduction
+
+The goal of this project is to develop a model predicting how effectively six participants exercised, based on nearly 20,000 observations of 160 variables. Class, the factor variable that ranks effectiveness from most to least serves as the regressor.
+
+Summary
+
+The model created produced an accuracy rate of 97.5 percent with 27 predictors with an error rate of 1.0 percent. It produced a Kappa of 96.8 percent with an error rate of 1.35 percent. 
+
+The top two most important predictors are pitch_forearm followed by yaw_belt. The predictor roll_belt showed a greater than .8 correlation with several other predictors so it was removed from the training set. 
+
+The mean of the predicted outcomes (after converting them to numbers (A=1, E=5) is 2.25 (slightly lower than B -- a B- or C+) with an error of 1.4 percent. 
+
+Developing the Model
+
+1. Read in training and testing data.
+
+```{r}
+
+## Read In Training and Testing Data
+
+training=read.csv("pml-training.csv",  stringsAsFactors=F, header=TRUE)
+testing=read.csv("pml-testing.csv", stringsAsFactors=F, header=TRUE)
+
+```
+2. Clean up data in testing and training sets by removing variables with full columns of NAs and unnecessary ones such as name. I kept only numeric variables in testing and training sets, with the exception of classe, which was removed from the training set and reattached after cleanup)
+
+```{r}
+## Delete NAs from training set
+
+newtrain=training[sapply(training, function(training) !any(is.na(training)))] 
+
+## Remove Unnecessary Variables
+
+newtrain<-newtrain[, -c(1:7)]
+
+## Remove NAs in testing set
+
+newtest=testing[sapply(testing, function(testing) !any(is.na(testing)))]
+
+##Retain Columns In Training Set That Are Numeric and Aren't NAs and subset out Classe variable to add later through cbind. 
+
+## Delete Classe Variable Column before subsetting out only numeric variables and deleting ones with NAs. 
+
+newtrain<-newtrain[,-86]
+
+newtrain <- newtrain[sapply(newtrain, is.numeric)]
+classe<-training[,160]
+newertrain<-cbind(newtrain, classe)
+
+```
+
+2. Take a look at the non-NA predictors to eliminate variables that correlate with others.
+
+```{r}
+
+## Setting up correlation matrix
+Correlation <- abs(cor(newertrain[,-53]))
+diag(Correlation) <- 0
+which(Correlation > 0.8,arr.ind=T)
+
+```
+Observation: It appears that the variable roll_belt has a high degree of correlation with yaw_belt, total_accel_belt, accel_belt_y, accel_belt_z. Might be a good idea to take it out. 
+
+```{r}
+
+## Remove Roll_Belt From Training Set
+
+newertrain=newertrain[,-1]
+
+```
+
+3. Pick 5000 random observations of nearly 20,000 from newertrain, which is cleaned training data, using 51 predictors.
+
+```{r}
+
+## Call up Caret Package
+
+library(caret)
+
+## Call up Kimisc Package to use sample.rows function to pick 5000 random observations. Set seed.
+
+library(kimisc)
+set.seed(1550)
+newtrainsample<-sample.rows(newertrain,5000, replace=TRUE)
+
+```
+4. Now, that we have a new training set with 5,000 observations, we begin to create the model, using Random Forest. First, we need to set the trainControl variable for cross-validation purposes. I set it at "cv" for the method and 10 for the number of folds.
+
+```{r}
+controltrain <- trainControl(method = "cv", number = 3, allowParallel = TRUE)
+```
+5. Create the Random Forest model, using 1,000 trees with centered and scaled preprocessing
+
+```{r}
+
+## Create Model To Fit Random Row Data Using Random Forest Method, Setting Number of Trees at 1000. 
+
+trainfit <- train(classe~., data = newtrainsample, method="rf", preProc=c("center", "scale"), trControl = controltrain, prox=FALSE, ntree=1000)
+
+```
+
+6. Print out trainfit's summary.
+
+```{r}
+cat("Trainfit's Summary", "\n")
+print(trainfit)
+```
+Conclusion: It shows that the model's accuracy exceeds 97.5 percent, depending on number of predictors used (mtry). The highest level is at 27. The lowest at two but not by much at all. 
+
+7. Plot trainfit to get more information.
+
+```{r}
+## Plot Trainfit
+plot(trainfit)
+```
+Conclusion: The plot shows that the model gets the highest rate of accuracy when mtry=27 with 97.5 percent accuracy with a standard error of 1.06 percent. The Kappa is 96.8 percent with an error of 1.35 percent.   
+
+8. Rank variables by importance using VarImp and plot top ones vs. class. 
+
+```{r}
+topvariables=varImp(trainfit)
+print(topvariables)
+```
+The two top variables -- pitch_forearm and yaw_belt have a -0.006 correlation, which shows that they have no linear relationship. 
+
+9. Plot densities of two top variables by classe
+
+```{r}
+## plot densities of top two variables. 
+
+qplot(pitch_forearm,colour=classe, data=newtrainsample, geom="density")
+```
+Class A, the most effective exercise style, hits its greatest height at 0 pitch_forearm. It's nearly a normal distribution from -25 to 75. There's a bump around -60 to half it's greatest height. 
+
+```{r}
+qplot(yaw_belt,colour=classe,data=newtrainsample, geom="density")
+```
+In the yaw_belt density plot, the density for A hits its highest when yaw_belt=roughly -75 and then falls, rising against to half its highest frequency at -5 yaw_belt and then going to zero and rising to 3/4 of the previous at 75 again.
+
+10. Apply training model to testing data.
+
+```{r}
+## Running the prediction on the test data
+pred <- predict(trainfit,newtest)
+cat("The predictions for the 20 samples are", as.character(pred))
+
+```
+11. Find standard error and mean of class from testing set.
+
+```{r}
+
+### merge predictions with newtest data set
+mergenewtest<-cbind(newtest, pred)
+### find sample mean and std error
+
+mergenewtestmean<-mean(as.numeric(mergenewtest$pred))
+stderror<-sd(mergenewtest$pred)
+
+cat("The mean and standard error of the predicted outcomes are:", mergenewtestmean, stderror)
+
+```
+With A=1 and E=5, the mean of the predicted outcomes using the test data is 2.25 or essentially slightly below B the second most efficient exercise technique. The standard error is 1.4. 
